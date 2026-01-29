@@ -39,7 +39,7 @@ moltbot/
 
 ```bash
 # Sur le VPS (en tant que root)
-curl -fsSL https://raw.githubusercontent.com/Whitemarmot/moltbot/main/scripts/setup-vps.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Whitemarmot/moltbot/master/scripts/setup-vps.sh | sudo bash
 ```
 
 Ou manuellement:
