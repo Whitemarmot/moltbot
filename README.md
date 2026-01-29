@@ -39,12 +39,12 @@ moltbot/
 
 ```bash
 # Sur le VPS (en tant que root)
-curl -fsSL https://raw.githubusercontent.com/YOUR_USERNAME/moltbot/main/scripts/setup-vps.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Whitemarmot/moltbot/main/scripts/setup-vps.sh | bash
 ```
 
 Ou manuellement:
 ```bash
-git clone https://github.com/YOUR_USERNAME/moltbot.git /opt/moltbot
+git clone https://github.com/Whitemarmot/moltbot.git /opt/moltbot
 cd /opt/moltbot
 chmod +x scripts/*.sh
 sudo ./scripts/setup-vps.sh
