@@ -1,0 +1,127 @@
+name: Deploy Moltbot to VPS
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+    inputs:
+      moltbot_version:
+        description: 'Moltbot version (latest, beta, or specific tag)'
+        required: false
+        default: 'latest'
+
+env:
+  MOLTBOT_VERSION: ${{ github.event.inputs.moltbot_version || 'latest' }}
+
+jobs:
+  deploy:
+    name: Deploy to VPS
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - name: Checkout deployment configs
+        uses: actions/checkout@v4
+
+      - name: Copy files to VPS
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          source: "docker-compose.prod.yml,scripts/*"
+          target: ${{ secrets.VPS_WORK_DIR }}
+          strip_components: 0
+
+      - name: Deploy Moltbot
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          MOLTBOT_VERSION: ${{ env.MOLTBOT_VERSION }}
+          CLAWDBOT_GATEWAY_TOKEN: ${{ secrets.CLAWDBOT_GATEWAY_TOKEN }}
+          CLAWDBOT_GATEWAY_PASSWORD: ${{ secrets.CLAWDBOT_GATEWAY_PASSWORD }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          DOMAIN: ${{ secrets.DOMAIN }}
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          envs: MOLTBOT_VERSION,CLAWDBOT_GATEWAY_TOKEN,CLAWDBOT_GATEWAY_PASSWORD,ANTHROPIC_API_KEY,DISCORD_BOT_TOKEN,TELEGRAM_BOT_TOKEN,DOMAIN
+          script: |
+            cd ${{ secrets.VPS_WORK_DIR }}
+
+            # Create .env file with secrets
+            cat > .env << EOF
+            MOLTBOT_VERSION=${MOLTBOT_VERSION}
+            CLAWDBOT_GATEWAY_TOKEN=${CLAWDBOT_GATEWAY_TOKEN}
+            CLAWDBOT_GATEWAY_PASSWORD=${CLAWDBOT_GATEWAY_PASSWORD}
+            ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+            DISCORD_BOT_TOKEN=${DISCORD_BOT_TOKEN}
+            TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+            DOMAIN=${DOMAIN}
+            EOF
+
+            # Secure the .env file
+            chmod 600 .env
+
+            # Pull latest image
+            docker pull ghcr.io/moltbot/moltbot:${MOLTBOT_VERSION}
+
+            # Stop existing container gracefully
+            docker compose -f docker-compose.prod.yml down --remove-orphans || true
+
+            # Start new container
+            docker compose -f docker-compose.prod.yml up -d moltbot-gateway
+
+            # Cleanup old images
+            docker image prune -f
+
+            # Show status
+            docker compose -f docker-compose.prod.yml ps
+            docker compose -f docker-compose.prod.yml logs --tail=20 moltbot-gateway
+
+      - name: Health check
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          script: |
+            # Wait for container to be ready
+            echo "Waiting for Moltbot to start..."
+            sleep 30
+
+            # Check if container is running
+            if docker ps | grep -q moltbot-gateway; then
+              echo "✅ Moltbot gateway is running"
+            else
+              echo "❌ Moltbot gateway failed to start"
+              docker compose -f ${{ secrets.VPS_WORK_DIR }}/docker-compose.prod.yml logs moltbot-gateway
+              exit 1
+            fi
+
+            # Check health endpoint
+            if curl -sf http://localhost:18789/health > /dev/null 2>&1; then
+              echo "✅ Health check passed"
+            else
+              echo "⚠️ Health endpoint not responding yet (may still be initializing)"
+            fi
+
+            echo "🎉 Deployment complete!"
+
+  notify:
+    name: Notify on failure
+    needs: deploy
+    runs-on: ubuntu-latest
+    if: failure()
+    steps:
+      - name: Send failure notification
+        run: |
+          echo "Deployment failed! Check the workflow logs."
+          # Add Discord/Slack webhook notification here if needed

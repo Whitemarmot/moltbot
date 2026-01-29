@@ -1,0 +1,106 @@
+name: Update Moltbot
+
+on:
+  schedule:
+    # Check for updates daily at 3 AM UTC
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: 'Update channel'
+        required: true
+        default: 'stable'
+        type: choice
+        options:
+          - stable
+          - beta
+          - dev
+
+jobs:
+  check-update:
+    name: Check for updates
+    runs-on: ubuntu-latest
+    outputs:
+      has_update: ${{ steps.check.outputs.has_update }}
+      new_version: ${{ steps.check.outputs.new_version }}
+
+    steps:
+      - name: Get current version on VPS
+        id: current
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          script: |
+            docker inspect ghcr.io/moltbot/moltbot:latest --format '{{.Id}}' 2>/dev/null || echo "none"
+
+      - name: Check latest version
+        id: check
+        run: |
+          CHANNEL=${{ github.event.inputs.channel || 'stable' }}
+
+          # Map channel to tag
+          case $CHANNEL in
+            stable) TAG="latest" ;;
+            beta) TAG="beta" ;;
+            dev) TAG="dev" ;;
+          esac
+
+          # Get latest digest from registry
+          LATEST=$(docker manifest inspect ghcr.io/moltbot/moltbot:$TAG 2>/dev/null | jq -r '.config.digest' || echo "error")
+
+          if [ "$LATEST" = "error" ]; then
+            echo "Failed to get latest version"
+            echo "has_update=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          echo "Latest: $LATEST"
+          echo "new_version=$TAG" >> $GITHUB_OUTPUT
+          echo "has_update=true" >> $GITHUB_OUTPUT
+
+  update:
+    name: Update Moltbot
+    needs: check-update
+    if: needs.check-update.outputs.has_update == 'true'
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Update Moltbot on VPS
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          MOLTBOT_VERSION: ${{ needs.check-update.outputs.new_version }}
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          envs: MOLTBOT_VERSION
+          script: |
+            cd ${{ secrets.VPS_WORK_DIR }}
+
+            echo "Updating to Moltbot version: ${MOLTBOT_VERSION}"
+
+            # Pull new image
+            docker pull ghcr.io/moltbot/moltbot:${MOLTBOT_VERSION}
+
+            # Graceful restart
+            docker compose -f docker-compose.prod.yml down moltbot-gateway
+            docker compose -f docker-compose.prod.yml up -d moltbot-gateway
+
+            # Cleanup
+            docker image prune -f
+
+            # Verify
+            sleep 15
+            docker compose -f docker-compose.prod.yml ps
+
+      - name: Notify update complete
+        run: |
+          echo "✅ Moltbot updated to ${{ needs.check-update.outputs.new_version }}"
