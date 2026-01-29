@@ -19,8 +19,8 @@ services:
       - DISCORD_BOT_TOKEN=${DISCORD_BOT_TOKEN:-}
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
     volumes:
-      - moltbot-config:/home/node/.clawdbot
-      - moltbot-workspace:/home/node/clawd
+      - moltbot-config:/home/node/.moltbot
+      - moltbot-workspace:/home/node/moltbot
       - moltbot-home:/home/node
     networks:
       - moltbot-network
@@ -64,8 +64,8 @@ services:
       - CLAWDBOT_GATEWAY_TOKEN=${CLAWDBOT_GATEWAY_TOKEN}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
     volumes:
-      - moltbot-config:/home/node/.clawdbot
-      - moltbot-workspace:/home/node/clawd
+      - moltbot-config:/home/node/.moltbot
+      - moltbot-workspace:/home/node/moltbot
       - moltbot-home:/home/node
     networks:
       - moltbot-network
