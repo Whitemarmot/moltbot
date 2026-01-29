@@ -6,14 +6,6 @@ on:
       - main
       - master
   workflow_dispatch:
-    inputs:
-      moltbot_version:
-        description: 'Moltbot version (latest, beta, or specific tag)'
-        required: false
-        default: 'latest'
-
-env:
-  MOLTBOT_VERSION: ${{ github.event.inputs.moltbot_version || 'latest' }}
 
 jobs:
   deploy:
@@ -32,14 +24,13 @@ jobs:
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_PORT || 22 }}
-          source: "docker-compose.prod.yml,scripts/*"
+          source: "docker-compose.prod.yml,docker-compose.yml,scripts/*"
           target: ${{ secrets.VPS_WORK_DIR }}
           strip_components: 0
 
       - name: Deploy Moltbot
         uses: appleboy/ssh-action@v1.0.3
         env:
-          MOLTBOT_VERSION: ${{ env.MOLTBOT_VERSION }}
           CLAWDBOT_GATEWAY_TOKEN: ${{ secrets.CLAWDBOT_GATEWAY_TOKEN }}
           CLAWDBOT_GATEWAY_PASSWORD: ${{ secrets.CLAWDBOT_GATEWAY_PASSWORD }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -51,13 +42,13 @@ jobs:
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_PORT || 22 }}
-          envs: MOLTBOT_VERSION,CLAWDBOT_GATEWAY_TOKEN,CLAWDBOT_GATEWAY_PASSWORD,ANTHROPIC_API_KEY,DISCORD_BOT_TOKEN,TELEGRAM_BOT_TOKEN,DOMAIN
+          envs: CLAWDBOT_GATEWAY_TOKEN,CLAWDBOT_GATEWAY_PASSWORD,ANTHROPIC_API_KEY,DISCORD_BOT_TOKEN,TELEGRAM_BOT_TOKEN,DOMAIN
+          command_timeout: 30m
           script: |
             cd ${{ secrets.VPS_WORK_DIR }}
 
             # Create .env file with secrets
             cat > .env << EOF
-            MOLTBOT_VERSION=${MOLTBOT_VERSION}
             CLAWDBOT_GATEWAY_TOKEN=${CLAWDBOT_GATEWAY_TOKEN}
             CLAWDBOT_GATEWAY_PASSWORD=${CLAWDBOT_GATEWAY_PASSWORD}
             ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
@@ -65,25 +56,38 @@ jobs:
             TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
             DOMAIN=${DOMAIN}
             EOF
-
-            # Secure the .env file
             chmod 600 .env
 
-            # Pull latest image
-            docker pull ghcr.io/moltbot/moltbot:${MOLTBOT_VERSION}
+            # Create magento network if not exists
+            docker network create magento-network 2>/dev/null || true
 
-            # Stop existing container gracefully
+            # Clone or update moltbot source
+            if [ -d "moltbot-src" ]; then
+              echo "Updating moltbot source..."
+              cd moltbot-src
+              git fetch origin
+              git reset --hard origin/main
+              cd ..
+            else
+              echo "Cloning moltbot source..."
+              git clone https://github.com/moltbot/moltbot.git moltbot-src
+            fi
+
+            # Stop existing container
             docker compose -f docker-compose.prod.yml down --remove-orphans || true
 
-            # Start new container
+            # Build and start
+            echo "Building moltbot image (this may take a few minutes)..."
+            docker compose -f docker-compose.prod.yml build --no-cache moltbot-gateway
+
+            echo "Starting moltbot gateway..."
             docker compose -f docker-compose.prod.yml up -d moltbot-gateway
 
-            # Cleanup old images
+            # Cleanup
             docker image prune -f
 
             # Show status
             docker compose -f docker-compose.prod.yml ps
-            docker compose -f docker-compose.prod.yml logs --tail=20 moltbot-gateway
 
       - name: Health check
         uses: appleboy/ssh-action@v1.0.3
@@ -93,35 +97,16 @@ jobs:
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_PORT || 22 }}
           script: |
-            # Wait for container to be ready
             echo "Waiting for Moltbot to start..."
-            sleep 30
+            sleep 60
 
-            # Check if container is running
             if docker ps | grep -q moltbot-gateway; then
               echo "✅ Moltbot gateway is running"
+              docker compose -f ${{ secrets.VPS_WORK_DIR }}/docker-compose.prod.yml logs --tail=20 moltbot-gateway
             else
               echo "❌ Moltbot gateway failed to start"
               docker compose -f ${{ secrets.VPS_WORK_DIR }}/docker-compose.prod.yml logs moltbot-gateway
               exit 1
             fi
 
-            # Check health endpoint
-            if curl -sf http://localhost:18789/health > /dev/null 2>&1; then
-              echo "✅ Health check passed"
-            else
-              echo "⚠️ Health endpoint not responding yet (may still be initializing)"
-            fi
-
             echo "🎉 Deployment complete!"
-
-  notify:
-    name: Notify on failure
-    needs: deploy
-    runs-on: ubuntu-latest
-    if: failure()
-    steps:
-      - name: Send failure notification
-        run: |
-          echo "Deployment failed! Check the workflow logs."
-          # Add Discord/Slack webhook notification here if needed
