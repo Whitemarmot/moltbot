@@ -25,6 +25,7 @@ services:
     networks:
       - moltbot-network
       - magento-network
+      - traefik-public
     deploy:
       resources:
         limits:
@@ -46,10 +47,16 @@ services:
         max-file: "5"
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.moltbot.rule=Host(`moltbot.${DOMAIN:-example.com}`)"
-      - "traefik.http.routers.moltbot.entrypoints=websecure"
-      - "traefik.http.routers.moltbot.tls.certresolver=letsencrypt"
-      - "traefik.http.services.moltbot.loadbalancer.server.port=18789"
+      # Gateway API (WebSocket)
+      - "traefik.http.routers.moltbot-api.rule=Host(`moltbot.${DOMAIN:-example.com}`)"
+      - "traefik.http.routers.moltbot-api.entrypoints=websecure"
+      - "traefik.http.routers.moltbot-api.tls.certresolver=letsencrypt"
+      - "traefik.http.services.moltbot-api.loadbalancer.server.port=18789"
+      # Dashboard UI
+      - "traefik.http.routers.moltbot-dashboard.rule=Host(`moltbot-ui.${DOMAIN:-example.com}`)"
+      - "traefik.http.routers.moltbot-dashboard.entrypoints=websecure"
+      - "traefik.http.routers.moltbot-dashboard.tls.certresolver=letsencrypt"
+      - "traefik.http.services.moltbot-dashboard.loadbalancer.server.port=18790"
     command: ["node", "dist/index.js", "gateway"]
 
   moltbot-cli:
@@ -86,3 +93,5 @@ networks:
   magento-network:
     external: true
     name: magento-network
+  traefik-public:
+    external: true
