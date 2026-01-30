@@ -60,7 +60,7 @@ services:
       - "traefik.http.routers.moltbot-dashboard.tls.certresolver=letsencrypt"
       - "traefik.http.routers.moltbot-dashboard.service=moltbot-dashboard"
       - "traefik.http.services.moltbot-dashboard.loadbalancer.server.port=18790"
-    command: ["node", "dist/index.js", "gateway", "start"]
+    command: ["node", "dist/index.js", "serve"]
 
   moltbot-cli:
     image: moltbot:local
