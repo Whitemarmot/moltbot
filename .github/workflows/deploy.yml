@@ -58,8 +58,9 @@ jobs:
             EOF
             chmod 600 .env
 
-            # Create magento network if not exists
+            # Create networks if not exists
             docker network create magento-network 2>/dev/null || true
+            docker network create traefik-public 2>/dev/null || true
 
             # Clone or update moltbot source
             if [ -d "moltbot-src" ]; then
